@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Manarion Quest Timer
 // @namespace    http://tampermonkey.net/
-// @version      0.0
+// @version      1.0
 // @description  Displays a quest timer countdown synced with kill progress; audio alert on completion; resets on quest complete.
 // @author       JAH
 // @match        *://manarion.com/*
@@ -12,7 +12,7 @@
     'use strict';
 
     const questCompleteSoundURL = 'https://www.pacdv.com/sounds/interface_sound_effects/sound14.mp3';
-    const masterAudioLevel = 0.1;
+    const masterAudioLevel = 0.2;
 
     function playSound(url) {
         const audio = new Audio(url);
@@ -99,17 +99,20 @@
 
         // Watch for changes
         const observer = new MutationObserver(() => {
-            const newEnemiesLeft = parseQuestProgress(questTextElement.textContent);
-            if (newEnemiesLeft !== null) {
-                if (newEnemiesLeft !== lastEnemiesLeft) {
-                    lastEnemiesLeft = newEnemiesLeft;
-                    startCountdown(newEnemiesLeft * 3);
-                    if (newEnemiesLeft === 0) playSound(questCompleteSoundURL);
-                } else if (newEnemiesLeft > 0 && remainingSeconds === 0) {
-                    console.log('[Quest Timer] New quest detected. Restarting timer.');
-                    lastEnemiesLeft = newEnemiesLeft;
-                    startCountdown(newEnemiesLeft * 3);
-                }
+            const match = questTextElement.textContent.match(/Defeat (\d+)\/(\d+) enemies/);
+            if (!match) return;
+
+            const current = parseInt(match[1], 10);
+            const total = parseInt(match[2], 10);
+            const enemiesLeft = total - current;
+
+            // Detect new quest (total count changed OR we finished last time)
+            const isNewQuest = total !== lastEnemiesLeft + current;
+
+            if (isNewQuest || (enemiesLeft !== lastEnemiesLeft)) {
+                lastEnemiesLeft = enemiesLeft;
+                startCountdown(enemiesLeft * 3);
+                if (enemiesLeft === 0) playSound(questCompleteSoundURL);
             }
         });
 
