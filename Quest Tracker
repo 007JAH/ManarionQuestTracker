@@ -1,0 +1,137 @@
+// ==UserScript==
+// @name         Manarion Quest Timer
+// @namespace    http://tampermonkey.net/
+// @version      0.0
+// @description  Displays a quest timer countdown synced with kill progress; audio alert on completion; resets on quest complete.
+// @author       JAH
+// @match        *://manarion.com/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const questCompleteSoundURL = 'https://www.pacdv.com/sounds/interface_sound_effects/sound14.mp3';
+    const masterAudioLevel = 0.1;
+
+    function playSound(url) {
+        const audio = new Audio(url);
+        audio.volume = masterAudioLevel;
+        audio.play().catch(e => console.warn('Sound failed:', e));
+    }
+
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    function observeQuestProgress() {
+        const questWrapper = document.querySelector(
+            '.border-primary.shadow-primary.w-full.border.p-2.text-center'
+        );
+        if (!questWrapper) {
+            console.warn('[Quest Timer] Container not found.');
+            return;
+        }
+
+        const questTextElement = questWrapper.querySelector('p.text-foreground.text-sm');
+        if (!questTextElement) {
+            console.warn('[Quest Timer] Quest progress text <p> not found.');
+            return;
+        }
+
+        let display = document.getElementById('manarion-quest-timer');
+        if (!display) {
+            display = document.createElement('span');
+            display.id = 'manarion-quest-timer';
+            display.style.display = 'block';
+            display.style.marginTop = '5px';
+            display.style.color = '#94a3b8';
+            display.style.fontSize = '0.9rem';
+            questTextElement.appendChild(display);
+        }
+
+        let remainingSeconds = 0;
+        let lastEnemiesLeft = null;
+        let countdownInterval = null;
+
+        function updateCountdownDisplay() {
+            if (remainingSeconds <= 0) {
+                display.textContent = `Time Remaining: 0:00`;
+                if (countdownInterval) {
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                }
+                return;
+            }
+            display.textContent = `Time Remaining: ${formatTime(remainingSeconds)}`;
+        }
+
+        function parseQuestProgress(textContent) {
+            const match = textContent.match(/Defeat (\d+)\/(\d+) enemies/);
+            if (match) {
+                const current = parseInt(match[1], 10);
+                const total = parseInt(match[2], 10);
+                return total - current;
+            }
+            return null;
+        }
+
+        function startCountdown(seconds) {
+            if (countdownInterval) clearInterval(countdownInterval);
+
+            remainingSeconds = seconds;
+            updateCountdownDisplay();
+
+            countdownInterval = setInterval(() => {
+                remainingSeconds--;
+                updateCountdownDisplay();
+            }, 1000);
+        }
+
+        // Initialize on load
+        const initialEnemies = parseQuestProgress(questTextElement.textContent);
+        if (initialEnemies !== null) {
+            lastEnemiesLeft = initialEnemies;
+            startCountdown(initialEnemies * 3);
+        }
+
+        // Watch for changes
+        const observer = new MutationObserver(() => {
+            const newEnemiesLeft = parseQuestProgress(questTextElement.textContent);
+            if (newEnemiesLeft !== null) {
+                if (newEnemiesLeft !== lastEnemiesLeft) {
+                    lastEnemiesLeft = newEnemiesLeft;
+                    startCountdown(newEnemiesLeft * 3);
+                    if (newEnemiesLeft === 0) playSound(questCompleteSoundURL);
+                } else if (newEnemiesLeft > 0 && remainingSeconds === 0) {
+                    console.log('[Quest Timer] New quest detected. Restarting timer.');
+                    lastEnemiesLeft = newEnemiesLeft;
+                    startCountdown(newEnemiesLeft * 3);
+                }
+            }
+        });
+
+        observer.observe(questTextElement, { childList: true, subtree: true });
+
+        console.log('[Quest Timer] Initialized and watching.');
+    }
+
+    // Wait until page content is loaded
+    function waitForQuestReady() {
+        const checker = setInterval(() => {
+            const questText = document.querySelector('.border-primary.shadow-primary.w-full.border.p-2.text-center p.text-foreground.text-sm');
+            if (questText) {
+                clearInterval(checker);
+                observeQuestProgress();
+            }
+        }, 500);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', waitForQuestReady);
+    } else {
+        waitForQuestReady();
+    }
+})();
